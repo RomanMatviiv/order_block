@@ -13,13 +13,27 @@ def format_block_message(symbol, timeframe, block):
     Args:
         symbol: Trading pair symbol (e.g., "BTC/USDT")
         timeframe: Timeframe string (e.g., "15m", "30m")
-        block: Order block dict with index, low, high, type
+        block: Order block dict with index, low, high, type, score, touches, has_sweep
         
     Returns:
         Formatted message string
     """
     block_type = block['type'].upper()
     emoji = "🟢" if block['type'] == 'bullish' else "🔴"
+    score = block.get('score', 0.5)
+    touches = block.get('touches', 1)
+    has_sweep = block.get('has_sweep', False)
+    
+    # Score indicator
+    if score >= 0.7:
+        score_indicator = "⭐⭐⭐ HIGH CONFIDENCE"
+    elif score >= 0.5:
+        score_indicator = "⭐⭐ MEDIUM CONFIDENCE"
+    else:
+        score_indicator = "⭐ LOW CONFIDENCE"
+    
+    # Liquidity sweep indicator
+    sweep_text = "\n🔥 Liquidity Sweep Detected!" if has_sweep else ""
     
     message = f"""{emoji} {block_type} Order Block Detected
 
@@ -28,6 +42,10 @@ Timeframe: {timeframe}
 Block Low: {block['low']:.2f}
 Block High: {block['high']:.2f}
 Candle Index: {block['index']}
+
+Confidence Score: {score:.2f} / 1.00
+{score_indicator}
+Touches: {touches}{sweep_text}
 
 {'Buy zone identified' if block['type'] == 'bullish' else 'Sell zone identified'}"""
     

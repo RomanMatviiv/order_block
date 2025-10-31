@@ -35,23 +35,55 @@ def plot_with_blocks(df, blocks, symbol, timeframe, save_path=None):
                                  facecolor=color, alpha=0.7)
         ax.add_patch(rect)
     
-    # Highlight bullish order blocks (green rectangles)
+    # Highlight bullish order blocks (green rectangles with score-based alpha)
     for block in blocks['bullish']:
         idx = block['index']
+        score = block.get('score', 0.5)
+        has_sweep = block.get('has_sweep', False)
+        
+        # Alpha based on score (min 0.2, max 0.6)
+        alpha = 0.2 + (score * 0.4)
+        
+        # Edge color and width based on sweep detection
+        edge_color = 'lime' if has_sweep else 'darkgreen'
+        edge_width = 3 if has_sweep else 2
+        
         block_rect = patches.Rectangle((idx - 0.5, block['low']), 1, 
                                       block['high'] - block['low'],
-                                      linewidth=2, edgecolor='darkgreen', 
-                                      facecolor='lightgreen', alpha=0.3)
+                                      linewidth=edge_width, edgecolor=edge_color, 
+                                      facecolor='lightgreen', alpha=alpha)
         ax.add_patch(block_rect)
+        
+        # Add score annotation
+        mid_price = (block['low'] + block['high']) / 2
+        ax.text(idx, mid_price, f"{score:.2f}", 
+               fontsize=8, ha='center', va='center',
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
     
-    # Highlight bearish order blocks (red rectangles)
+    # Highlight bearish order blocks (red rectangles with score-based alpha)
     for block in blocks['bearish']:
         idx = block['index']
+        score = block.get('score', 0.5)
+        has_sweep = block.get('has_sweep', False)
+        
+        # Alpha based on score (min 0.2, max 0.6)
+        alpha = 0.2 + (score * 0.4)
+        
+        # Edge color and width based on sweep detection
+        edge_color = 'orangered' if has_sweep else 'darkred'
+        edge_width = 3 if has_sweep else 2
+        
         block_rect = patches.Rectangle((idx - 0.5, block['low']), 1, 
                                       block['high'] - block['low'],
-                                      linewidth=2, edgecolor='darkred', 
-                                      facecolor='lightcoral', alpha=0.3)
+                                      linewidth=edge_width, edgecolor=edge_color, 
+                                      facecolor='lightcoral', alpha=alpha)
         ax.add_patch(block_rect)
+        
+        # Add score annotation
+        mid_price = (block['low'] + block['high']) / 2
+        ax.text(idx, mid_price, f"{score:.2f}", 
+               fontsize=8, ha='center', va='center',
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
     
     ax.set_xlabel('Candle Index')
     ax.set_ylabel('Price')
