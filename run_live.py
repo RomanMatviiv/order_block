@@ -20,7 +20,7 @@ from src import notifier
 
 
 # Global store for seen blocks (in-memory deduplication)
-# Key format: "{symbol}_{timeframe}_{index}_{type}"
+# Key format: "{symbol}_{timeframe}_{index}_{type}_{score_rounded}"
 SEEN_BLOCKS = set()
 LOCK = threading.Lock()
 
@@ -40,15 +40,17 @@ def worker_thread(symbol, timeframe):
             # Fetch recent data
             df = data_fetcher.fetch_last_n_days(symbol, timeframe, days=config.HISTORY_DAYS)
             
-            # Detect order blocks
+            # Detect order blocks with new advanced algorithm
             blocks = detection.detect_order_blocks(df)
             
             # Process all detected blocks
             all_blocks = blocks['bullish'] + blocks['bearish']
             
             for block in all_blocks:
-                # Create unique key for this block
-                block_key = f"{symbol}_{timeframe}_{block['index']}_{block['type']}"
+                # Create unique key for this block (include rounded score for dedup)
+                score = block.get('score', 0.5)
+                score_rounded = round(score, 2)
+                block_key = f"{symbol}_{timeframe}_{block['index']}_{block['type']}_{score_rounded}"
                 
                 # Check if we've already notified about this block
                 with LOCK:
@@ -58,7 +60,7 @@ def worker_thread(symbol, timeframe):
                 
                 # New block detected - send notification
                 message = notifier.format_block_message(symbol, timeframe, block)
-                print(f"\n[{symbol} {timeframe}] New {block['type']} order block detected at index {block['index']}")
+                print(f"\n[{symbol} {timeframe}] New {block['type']} order block detected at index {block['index']} (score: {score:.2f})")
                 notifier.send_telegram(message)
             
         except Exception as e:

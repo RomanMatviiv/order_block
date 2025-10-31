@@ -144,12 +144,15 @@ Telegram notification sent successfully
 
 ### Telegram Notification Format
 
-Notifications include:
+Notifications include enhanced information:
 - Symbol name (e.g., BTC/USDT)
 - Timeframe (e.g., 15m)
 - Block type (BULLISH or BEARISH)
 - Price levels (low and high)
 - Candle index
+- **Confidence score (0-1) with star rating**
+- **Number of touches**
+- **Liquidity sweep indicator** (if detected)
 
 Example notification:
 ```
@@ -161,8 +164,18 @@ Block Low: 42150.50
 Block High: 42350.75
 Candle Index: 150
 
+Confidence Score: 0.73 / 1.00
+⭐⭐⭐ HIGH CONFIDENCE
+Touches: 2
+🔥 Liquidity Sweep Detected!
+
 Buy zone identified
 ```
+
+**Confidence Score Ratings:**
+- ⭐⭐⭐ HIGH CONFIDENCE: Score ≥ 0.7
+- ⭐⭐ MEDIUM CONFIDENCE: Score ≥ 0.5
+- ⭐ LOW CONFIDENCE: Score < 0.5
 
 ## Project Structure
 
@@ -185,17 +198,105 @@ order_block/
 
 ## Order Block Detection Logic
 
-The system identifies order blocks using the following criteria:
+The system uses an advanced order block detection algorithm with multiple validation layers:
+
+### Detection Algorithm Features
+
+1. **ATR-based Candle Filtering**
+   - Candidate candles must have a sufficiently large body relative to ATR
+   - Opposite-side wicks must be small to avoid false signals
+   - Configurable via `BODY_MIN_RATIO` and `WICK_MAX_RATIO`
+
+2. **Impulse Confirmation**
+   - After the candidate candle, there must be a strong directional move
+   - Validates both the number of directional candles and net price movement
+   - Configurable via `DETECTION_LOOKAHEAD`, `IMPULSE_MIN_DIR_CANDLES`, and `IMPULSE_MIN_NET_MOVE`
+
+3. **Multi-touch Validation**
+   - Tracks how many times price returns to touch the zone
+   - Higher touch counts indicate stronger zones
+   - Configurable via `TOUCHES_REQUIRED` and `MAX_TOUCHES`
+
+4. **Liquidity Sweep Detection (Optional)**
+   - Identifies stop-hunts: quick wick extensions followed by reversals
+   - Zones with liquidity sweeps receive higher confidence scores
+   - Marked with special highlighting in charts and notifications
+
+5. **Confidence Scoring**
+   - Composite score (0-1) based on multiple factors:
+     - Candle body size relative to ATR (20% weight)
+     - Impulse strength (30% weight)
+     - Number of touches (20% weight)
+     - Volume spike (15% weight)
+     - Liquidity sweep detection (15% weight)
+   - Zones are displayed with shading intensity based on score
+
+6. **Zone Management**
+   - Overlapping zones are automatically merged
+   - Zones expire after a configurable number of bars
+   - Configurable via `ZONE_EXPIRY_BARS` and `ZONE_MERGE_THRESHOLD`
+
+### Block Types
 
 **Bullish Order Block:**
-- A down candle (close < open) followed by a strong upward move
-- The next candle's range is at least 1.5x the current candle's range
+- A down candle (close < open) with substantial body
+- Small upper wick (opposite side)
+- Followed by strong upward impulse
 - Represents a potential support zone where buyers stepped in
 
 **Bearish Order Block:**
-- An up candle (close > open) followed by a strong downward move
-- The next candle's range is at least 1.5x the current candle's range
+- An up candle (close > open) with substantial body
+- Small lower wick (opposite side)
+- Followed by strong downward impulse
 - Represents a potential resistance zone where sellers stepped in
+
+### Detection Parameters
+
+You can tune the detection algorithm by editing these parameters in `src/config.py`:
+
+```python
+# ATR settings
+ATR_PERIOD = 14              # ATR calculation period
+ATR_MULT = 1.0              # ATR multiplier for thresholds
+
+# Candle filters
+BODY_MIN_RATIO = 0.5        # Min body size as ratio of ATR (0.5 = 50%)
+WICK_MAX_RATIO = 0.3        # Max opposite wick as ratio of body (0.3 = 30%)
+
+# Impulse confirmation
+DETECTION_LOOKAHEAD = 10    # Bars to check for impulse
+IMPULSE_MIN_DIR_CANDLES = 6 # Min directional candles required
+IMPULSE_MIN_NET_MOVE = 1.5  # Min net movement as multiple of ATR
+
+# Touch validation
+TOUCHES_REQUIRED = 1        # Min touches for validation (1 = initial)
+MAX_TOUCHES = 5             # Max touches before zone exhaustion
+
+# Zone management
+ZONE_EXPIRY_BARS = 100     # Bars until zone expires
+ZONE_MERGE_THRESHOLD = 0.5  # Overlap % for merging zones
+
+# Volume and liquidity
+MIN_VOLUME_SPIKE_MULT = 1.5    # Min volume spike multiplier
+LIQUIDITY_SWEEP_WICK_RATIO = 0.6  # Wick ratio for sweep detection
+LIQUIDITY_SWEEP_REVERSAL_BARS = 3 # Bars to check for reversal
+
+# Scoring weights (must sum to 1.0)
+SCORE_WEIGHT_BODY_SIZE = 0.20
+SCORE_WEIGHT_IMPULSE = 0.30
+SCORE_WEIGHT_TOUCHES = 0.20
+SCORE_WEIGHT_VOLUME = 0.15
+SCORE_WEIGHT_LIQUIDITY_SWEEP = 0.15
+```
+
+### Tuning Tips
+
+- **Increase `BODY_MIN_RATIO`** to detect only stronger candles (more selective)
+- **Decrease `WICK_MAX_RATIO`** to filter out candles with large wicks (cleaner signals)
+- **Increase `IMPULSE_MIN_DIR_CANDLES`** to require stronger impulse moves (fewer but higher quality)
+- **Increase `TOUCHES_REQUIRED`** to wait for price confirmation (more reliable but delayed)
+- **Adjust `ZONE_EXPIRY_BARS`** based on your timeframe (longer for higher timeframes)
+- **Adjust scoring weights** to emphasize factors most important for your strategy
 
 ## Requirements
 
