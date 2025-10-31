@@ -6,6 +6,20 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 
+# Cache the exchange instance for reuse
+_exchange = None
+
+
+def _get_exchange():
+    """Get or create the cached exchange instance."""
+    global _exchange
+    if _exchange is None:
+        _exchange = ccxt.binance({
+            'enableRateLimit': True,
+        })
+    return _exchange
+
+
 def fetch_last_n_days(symbol, timeframe, days=2):
     """
     Fetch OHLCV data for the last N days for a given symbol and timeframe.
@@ -18,9 +32,7 @@ def fetch_last_n_days(symbol, timeframe, days=2):
     Returns:
         pandas.DataFrame with columns: timestamp, open, high, low, close, volume
     """
-    exchange = ccxt.binance({
-        'enableRateLimit': True,
-    })
+    exchange = _get_exchange()
     
     # Calculate the start time
     since = exchange.parse8601((datetime.utcnow() - timedelta(days=days)).isoformat())

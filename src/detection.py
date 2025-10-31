@@ -4,6 +4,7 @@ Identifies bullish and bearish order blocks in price data.
 """
 import pandas as pd
 import numpy as np
+from . import config
 
 
 def detect_order_blocks(df, lookback=20):
@@ -40,7 +41,7 @@ def detect_order_blocks(df, lookback=20):
         
         # Bullish order block: down candle followed by strong up move
         if current['close'] < current['open'] and next_candle['close'] > next_candle['open']:
-            if next_range > current_range * 1.5:  # Strong move threshold
+            if next_range > current_range * config.STRONG_MOVE_THRESHOLD:
                 blocks['bullish'].append({
                     'index': i,
                     'low': current['low'],
@@ -50,7 +51,7 @@ def detect_order_blocks(df, lookback=20):
         
         # Bearish order block: up candle followed by strong down move
         if current['close'] > current['open'] and next_candle['close'] < next_candle['open']:
-            if next_range > current_range * 1.5:  # Strong move threshold
+            if next_range > current_range * config.STRONG_MOVE_THRESHOLD:
                 blocks['bearish'].append({
                     'index': i,
                     'low': current['low'],

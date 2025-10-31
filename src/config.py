@@ -10,3 +10,12 @@ TIMEFRAMES = ["15m", "30m"]
 
 # Live polling interval in seconds (used by run_live worker)
 POLL_INTERVAL_SEC = 30
+
+# Number of days of historical data to fetch
+HISTORY_DAYS = 2
+
+# Strong move threshold for order block detection (multiplier)
+STRONG_MOVE_THRESHOLD = 1.5
+
+# Telegram notification timeout in seconds
+TELEGRAM_TIMEOUT_SEC = 10

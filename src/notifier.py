@@ -3,6 +3,7 @@ Telegram notification module for sending order block alerts.
 """
 import os
 import requests
+from . import config
 
 
 def format_block_message(symbol, timeframe, block):
@@ -58,7 +59,7 @@ def send_telegram(message):
     }
     
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=config.TELEGRAM_TIMEOUT_SEC)
         if response.status_code == 200:
             print("Telegram notification sent successfully")
             return True

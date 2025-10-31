@@ -34,8 +34,8 @@ def main():
             print(f"\nProcessing {symbol} on {timeframe}...")
             
             try:
-                # Fetch historical data (2 days)
-                df = data_fetcher.fetch_last_n_days(symbol, timeframe, days=2)
+                # Fetch historical data
+                df = data_fetcher.fetch_last_n_days(symbol, timeframe, days=config.HISTORY_DAYS)
                 print(f"  Fetched {len(df)} candles")
                 
                 # Detect order blocks

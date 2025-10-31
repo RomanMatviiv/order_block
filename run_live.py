@@ -37,8 +37,8 @@ def worker_thread(symbol, timeframe):
     
     while True:
         try:
-            # Fetch recent data (2 days to have enough history for detection)
-            df = data_fetcher.fetch_last_n_days(symbol, timeframe, days=2)
+            # Fetch recent data
+            df = data_fetcher.fetch_last_n_days(symbol, timeframe, days=config.HISTORY_DAYS)
             
             # Detect order blocks
             blocks = detection.detect_order_blocks(df)
