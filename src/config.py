@@ -56,3 +56,10 @@ SCORE_WEIGHT_IMPULSE = 0.30  # Weight for impulse strength score
 SCORE_WEIGHT_TOUCHES = 0.20  # Weight for number of touches score
 SCORE_WEIGHT_VOLUME = 0.15  # Weight for volume spike score
 SCORE_WEIGHT_LIQUIDITY_SWEEP = 0.15  # Weight for liquidity sweep detection
+
+# Validate scoring weights sum to 1.0
+_TOTAL_SCORE_WEIGHT = (SCORE_WEIGHT_BODY_SIZE + SCORE_WEIGHT_IMPULSE + 
+                       SCORE_WEIGHT_TOUCHES + SCORE_WEIGHT_VOLUME + 
+                       SCORE_WEIGHT_LIQUIDITY_SWEEP)
+assert abs(_TOTAL_SCORE_WEIGHT - 1.0) < 0.001, \
+    f"Score weights must sum to 1.0, got {_TOTAL_SCORE_WEIGHT}"

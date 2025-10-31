@@ -199,7 +199,7 @@ class TestATRCalculation:
         atr = detection.calculate_atr(df, period=14)
         
         assert len(atr) == len(df)
-        assert not atr.iloc[-1] == 0  # Should have non-zero ATR
+        assert atr.iloc[-1] != 0  # Should have non-zero ATR
         assert pd.notna(atr.iloc[-1])  # Should not be NaN at the end
 
 

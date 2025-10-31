@@ -194,7 +194,9 @@ def calculate_zone_score(body_size_ratio: float, impulse_strength: float,
     impulse_score = impulse_strength
     
     # Touch score (more touches = higher confidence, up to MAX_TOUCHES)
-    touch_score = min(touch_count / config.MAX_TOUCHES, 1.0)
+    # Guard against division by zero
+    max_touches = max(config.MAX_TOUCHES, 1)
+    touch_score = min(touch_count / max_touches, 1.0)
     
     # Volume score (normalize to 0-1, cap at 3x average)
     volume_score = min((volume_spike - 1.0) / 2.0, 1.0) if volume_spike > 1.0 else 0.0
@@ -310,6 +312,22 @@ def merge_overlapping_zones(zones: List[Dict]) -> List[Dict]:
     return merged
 
 
+def calculate_volume_spike(candle_volume: float, avg_volume: float) -> float:
+    """
+    Calculate volume spike ratio for a candle.
+    
+    Args:
+        candle_volume: Volume of the candle
+        avg_volume: Average volume (from rolling window)
+        
+    Returns:
+        Volume spike ratio (1.0 = average volume)
+    """
+    if pd.isna(avg_volume) or avg_volume <= 0:
+        return 1.0
+    return candle_volume / avg_volume
+
+
 def detect_order_zones(df: pd.DataFrame,
                       atr_period: int = None,
                       atr_mult: float = None,
@@ -412,7 +430,7 @@ def detect_order_zones(df: pd.DataFrame,
                                             is_bullish=True, current_idx=len(df) - 1)
                 
                 # Calculate volume spike
-                volume_ratio = candle['volume'] / avg_volume.iloc[i] if not pd.isna(avg_volume.iloc[i]) and avg_volume.iloc[i] > 0 else 1.0
+                volume_ratio = calculate_volume_spike(candle['volume'], avg_volume.iloc[i])
                 
                 # Calculate body size ratio
                 body_size = abs(candle['close'] - candle['open'])
@@ -460,7 +478,7 @@ def detect_order_zones(df: pd.DataFrame,
                                             is_bullish=False, current_idx=len(df) - 1)
                 
                 # Calculate volume spike
-                volume_ratio = candle['volume'] / avg_volume.iloc[i] if not pd.isna(avg_volume.iloc[i]) and avg_volume.iloc[i] > 0 else 1.0
+                volume_ratio = calculate_volume_spike(candle['volume'], avg_volume.iloc[i])
                 
                 # Calculate body size ratio
                 body_size = abs(candle['close'] - candle['open'])
