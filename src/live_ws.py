@@ -10,7 +10,7 @@ import websockets
 import pandas as pd
 from typing import Dict, Set, Tuple
 from datetime import datetime
-from collections import defaultdict
+from collections import defaultdict, deque
 
 from . import config
 from . import detection
@@ -92,7 +92,9 @@ class DeduplicationState:
             state_file: Path to state file
         """
         self.state_file = state_file
-        self.seen_blocks: Set[str] = set()
+        # Use deque to maintain order for pruning
+        self.seen_blocks: deque = deque()
+        self.seen_set: Set[str] = set()  # For fast lookup
         self.load_state()
     
     def load_state(self) -> None:
@@ -101,11 +103,14 @@ class DeduplicationState:
             try:
                 with open(self.state_file, 'r') as f:
                     data = json.load(f)
-                    self.seen_blocks = set(data.get('seen_blocks', []))
+                    blocks = data.get('seen_blocks', [])
+                    self.seen_blocks = deque(blocks)
+                    self.seen_set = set(blocks)
                 print(f"Loaded {len(self.seen_blocks)} seen blocks from state file")
             except Exception as e:
                 print(f"Warning: Could not load state file: {e}")
-                self.seen_blocks = set()
+                self.seen_blocks = deque()
+                self.seen_set = set()
     
     def save_state(self) -> None:
         """Save state to file."""
@@ -129,7 +134,7 @@ class DeduplicationState:
         Returns:
             True if block was seen before
         """
-        return block_key in self.seen_blocks
+        return block_key in self.seen_set
     
     def mark_seen(self, block_key: str) -> None:
         """
@@ -138,21 +143,27 @@ class DeduplicationState:
         Args:
             block_key: Unique block identifier
         """
-        self.seen_blocks.add(block_key)
-        self.save_state()
+        if block_key not in self.seen_set:
+            self.seen_blocks.append(block_key)
+            self.seen_set.add(block_key)
+            self.save_state()
     
     def prune_old_entries(self, max_entries: int = 10000) -> None:
         """
         Prune old entries if state grows too large.
+        Removes oldest entries first (FIFO).
         
         Args:
             max_entries: Maximum number of entries to keep
         """
         if len(self.seen_blocks) > max_entries:
-            # Keep the most recent entries (this is approximate since we don't have timestamps)
-            # For now, just clear if too large
-            print(f"State file too large ({len(self.seen_blocks)} entries), pruning...")
-            self.seen_blocks = set(list(self.seen_blocks)[-max_entries:])
+            # Remove oldest entries
+            to_remove = len(self.seen_blocks) - max_entries
+            print(f"State file too large ({len(self.seen_blocks)} entries), removing {to_remove} oldest entries...")
+            for _ in range(to_remove):
+                if self.seen_blocks:
+                    old_key = self.seen_blocks.popleft()
+                    self.seen_set.discard(old_key)
             self.save_state()
 
 
@@ -282,10 +293,11 @@ class BinanceWebSocketClient:
             all_blocks = blocks['bullish'] + blocks['bearish']
             
             for block in all_blocks:
-                # Create unique key for deduplication
+                # Create unique key for deduplication using pipe delimiter
+                # Format: symbol|timeframe|index|type|score
                 score = block.get('score', 0.5)
                 score_rounded = round(score, 2)
-                block_key = f"{symbol}_{timeframe}_{block['index']}_{block['type']}_{score_rounded}"
+                block_key = f"{symbol}|{timeframe}|{block['index']}|{block['type']}|{score_rounded}"
                 
                 # Check if already seen
                 if self.dedup_state.is_seen(block_key):
@@ -300,7 +312,7 @@ class BinanceWebSocketClient:
                 notifier.send_telegram(message_text)
             
             # Periodically prune state file
-            if len(self.dedup_state.seen_blocks) > 10000:
+            if len(self.dedup_state.seen_set) > 10000:
                 self.dedup_state.prune_old_entries()
         
         except Exception as e:

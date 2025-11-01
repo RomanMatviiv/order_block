@@ -120,6 +120,7 @@ class TestDeduplicationState:
         try:
             state = live_ws.DeduplicationState(state_file)
             assert len(state.seen_blocks) == 0
+            assert len(state.seen_set) == 0
         finally:
             if os.path.exists(state_file):
                 os.remove(state_file)
@@ -132,7 +133,7 @@ class TestDeduplicationState:
         try:
             state = live_ws.DeduplicationState(state_file)
             
-            block_key = "BTC/USDT_15m_100_bullish_0.75"
+            block_key = "BTC/USDT|15m|100|bullish|0.75"
             
             # Initially not seen
             assert not state.is_seen(block_key)
@@ -142,6 +143,8 @@ class TestDeduplicationState:
             
             # Should now be seen
             assert state.is_seen(block_key)
+            assert len(state.seen_blocks) == 1
+            assert len(state.seen_set) == 1
         finally:
             if os.path.exists(state_file):
                 os.remove(state_file)
@@ -154,7 +157,7 @@ class TestDeduplicationState:
         try:
             # Create state and mark block as seen
             state1 = live_ws.DeduplicationState(state_file)
-            block_key = "BTC/USDT_15m_100_bullish_0.75"
+            block_key = "BTC/USDT|15m|100|bullish|0.75"
             state1.mark_seen(block_key)
             
             # Create new state instance (simulating restart)
@@ -162,12 +165,14 @@ class TestDeduplicationState:
             
             # Should still be seen
             assert state2.is_seen(block_key)
+            assert len(state2.seen_blocks) == 1
+            assert len(state2.seen_set) == 1
         finally:
             if os.path.exists(state_file):
                 os.remove(state_file)
     
     def test_prune_old_entries(self):
-        """Test pruning old entries."""
+        """Test pruning old entries using FIFO."""
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
             state_file = f.name
         
@@ -178,11 +183,27 @@ class TestDeduplicationState:
             for i in range(150):
                 state.mark_seen(f"block_{i}")
             
-            # Prune to 100
+            assert len(state.seen_blocks) == 150
+            assert len(state.seen_set) == 150
+            
+            # Remember the first and last blocks
+            first_block = "block_0"
+            last_block = "block_149"
+            
+            # Prune to 100 (should remove oldest 50)
             state.prune_old_entries(max_entries=100)
             
-            # Should have at most 100 entries
-            assert len(state.seen_blocks) <= 100
+            # Should have exactly 100 entries
+            assert len(state.seen_blocks) == 100
+            assert len(state.seen_set) == 100
+            
+            # First 50 blocks should be removed (FIFO)
+            assert not state.is_seen(first_block)
+            assert not state.is_seen("block_49")
+            
+            # Last 100 blocks should remain
+            assert state.is_seen("block_50")
+            assert state.is_seen(last_block)
         finally:
             if os.path.exists(state_file):
                 os.remove(state_file)
