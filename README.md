@@ -104,18 +104,55 @@ Historical analysis complete!
 
 ### Live Monitoring
 
-Run live order block detection with Telegram notifications:
+There are two ways to run live order block detection with Telegram notifications:
+
+#### Option 1: WebSocket-based Live Detection (Recommended)
+
+Run real-time WebSocket-based detection:
+
+```bash
+python -m src.live_ws
+```
+
+This modern approach:
+- Uses Binance's WebSocket API for instant candle updates
+- Processes only closed kline events for accurate detection
+- Maintains persistent deduplication state across restarts (saved to `dedup_state.json`)
+- Implements automatic reconnection with exponential backoff
+- More efficient than polling (lower latency, less bandwidth)
+- Integrates with the advanced detection algorithm (`detect_order_zones`)
+- Sends Telegram notifications with confidence scores
+
+Example output:
+```
+============================================================
+Order Block Live Detection (WebSocket)
+============================================================
+Symbols: ['BTC/USDT', 'ETH/USDT']
+Timeframes: ['15m', '30m']
+
+2025-01-01 10:00:00 - INFO - Starting Binance WebSocket client
+2025-01-01 10:00:00 - INFO - WebSocket connected successfully
+2025-01-01 10:00:00 - INFO - Monitoring 2 symbols on 2 timeframes
+2025-01-01 10:15:00 - INFO - Processing closed kline: BTC/USDT 15m
+2025-01-01 10:15:01 - INFO - New bullish order block detected: BTC/USDT 15m (score: 0.78)
+Telegram notification sent successfully
+```
+
+#### Option 2: Polling-based Live Monitoring (Legacy)
+
+Run traditional polling-based live order block detection:
 
 ```bash
 python run_live.py
 ```
 
-This will:
+This approach:
 - Start a separate worker thread for each symbol/timeframe combination
 - Poll Binance every 30 seconds (configurable via `POLL_INTERVAL_SEC`)
 - Detect new order blocks in real-time
 - Send Telegram notifications for each new detection
-- Keep track of notified blocks to avoid duplicates
+- Keep track of notified blocks to avoid duplicates (in-memory only)
 
 Example output:
 ```
@@ -188,10 +225,15 @@ order_block/
 │   ├── detection.py           # Order block detection algorithm
 │   ├── generate_entry_signals.py  # Entry signal generation
 │   ├── plotter.py             # Chart generation with matplotlib
-│   └── notifier.py            # Telegram notification handling
+│   ├── notifier.py            # Telegram notification handling
+│   └── live_ws.py             # WebSocket-based live detection (NEW)
+├── tests/
+│   ├── test_detection.py      # Detection algorithm tests
+│   └── test_live_ws.py        # WebSocket implementation tests (NEW)
 ├── charts/                    # Generated charts directory
 ├── run_history.py             # Historical analysis script
-├── run_live.py                # Live monitoring script
+├── run_live.py                # Live monitoring script (polling-based)
+├── dedup_state.json           # Persistent deduplication state (auto-generated)
 ├── requirements.txt           # Python dependencies
 └── README.md                  # This file
 ```
@@ -306,6 +348,9 @@ SCORE_WEIGHT_LIQUIDITY_SWEEP = 0.15
 - matplotlib (for chart generation)
 - requests (for Telegram API)
 - numpy (for numerical operations)
+- websockets (for WebSocket-based live detection)
+- pytest (for running tests)
+- pytest-asyncio (for async tests)
 
 ## Troubleshooting
 

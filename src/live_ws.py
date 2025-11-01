@@ -117,14 +117,14 @@ class DeduplicationManager:
     
     def _load_state(self):
         """Load deduplication state from file."""
-        if self.state_file.exists():
+        if self.state_file.exists() and self.state_file.stat().st_size > 0:
             try:
                 with open(self.state_file, 'r') as f:
                     data = json.load(f)
                     self.seen_blocks = set(data.get('seen_blocks', []))
                     logger.info(f"Loaded {len(self.seen_blocks)} seen blocks from {self.state_file}")
             except Exception as e:
-                logger.error(f"Failed to load state file: {e}")
+                logger.warning(f"Failed to load state file, starting fresh: {e}")
                 self.seen_blocks = set()
         else:
             logger.info("No existing state file found, starting fresh")
