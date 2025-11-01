@@ -17,8 +17,7 @@ from . import detection
 from . import notifier
 
 
-# Path to persistent deduplication state file
-STATE_FILE = os.path.join(os.path.dirname(__file__), '..', '.dedup_state.json')
+
 
 
 class KlineBuffer:
@@ -181,13 +180,13 @@ class BinanceWebSocketClient:
         self.symbols = symbols
         self.timeframes = timeframes
         self.buffers: Dict[Tuple[str, str], KlineBuffer] = {}
-        self.dedup_state = DeduplicationState(STATE_FILE)
+        self.dedup_state = DeduplicationState(config.STATE_FILE)
         
         # Initialize buffers for each symbol/timeframe pair
         for symbol in symbols:
             for timeframe in timeframes:
                 key = (symbol, timeframe)
-                self.buffers[key] = KlineBuffer()
+                self.buffers[key] = KlineBuffer(max_candles=config.WS_MAX_BARS)
     
     def get_stream_names(self) -> list:
         """
@@ -297,6 +296,11 @@ class BinanceWebSocketClient:
                 # Format: symbol|timeframe|index|type|score
                 score = block.get('score', 0.5)
                 score_rounded = round(score, 2)
+                
+                # Skip blocks below minimum score threshold
+                if score < config.WS_NOTIFY_SCORE_MIN:
+                    continue
+                
                 block_key = f"{symbol}|{timeframe}|{block['index']}|{block['type']}|{score_rounded}"
                 
                 # Check if already seen
