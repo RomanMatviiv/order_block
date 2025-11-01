@@ -28,6 +28,13 @@ TIMEFRAMES = ["15m", "30m"]
 # Live polling interval in seconds (used by run_live worker)
 POLL_INTERVAL_SEC = 30
 
+# WebSocket configuration
+WS_MAX_BARS = 500  # Maximum number of bars to keep in WebSocket buffer
+WS_NOTIFY_SCORE_MIN = 0.25  # Minimum confidence score to send notifications
+
+# State file configuration
+STATE_FILE = 'data/state.json'  # Path to persistent state file
+
 # Number of days of historical data to fetch
 HISTORY_DAYS = 2
 

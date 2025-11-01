@@ -15,23 +15,21 @@ from collections import defaultdict, deque
 from . import config
 from . import detection
 from . import notifier
-
-
-# Path to persistent deduplication state file
-STATE_FILE = os.path.join(os.path.dirname(__file__), '..', '.dedup_state.json')
+from . import state
 
 
 class KlineBuffer:
     """Manages a rolling buffer of klines for a symbol/timeframe pair."""
     
-    def __init__(self, max_candles: int = 200):
+    def __init__(self, max_candles: int = None):
         """
         Initialize the kline buffer.
         
         Args:
-            max_candles: Maximum number of candles to keep in buffer
+            max_candles: Maximum number of candles to keep in buffer.
+                        If None, uses config.WS_MAX_BARS
         """
-        self.max_candles = max_candles
+        self.max_candles = max_candles if max_candles is not None else config.WS_MAX_BARS
         self.klines = []
     
     def add_kline(self, kline_data: Dict) -> None:
@@ -82,7 +80,7 @@ class KlineBuffer:
 
 
 class DeduplicationState:
-    """Manages persistent deduplication state across restarts."""
+    """Manages persistent deduplication state across restarts using the state module."""
     
     def __init__(self, state_file: str):
         """
@@ -98,29 +96,27 @@ class DeduplicationState:
         self.load_state()
     
     def load_state(self) -> None:
-        """Load state from file if it exists."""
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, 'r') as f:
-                    data = json.load(f)
-                    blocks = data.get('seen_blocks', [])
-                    self.seen_blocks = deque(blocks)
-                    self.seen_set = set(blocks)
+        """Load state from file if it exists using the state module."""
+        try:
+            data = state.load_state(self.state_file)
+            blocks = data.get('seen_blocks', [])
+            self.seen_blocks = deque(blocks)
+            self.seen_set = set(blocks)
+            if blocks:
                 print(f"Loaded {len(self.seen_blocks)} seen blocks from state file")
-            except Exception as e:
-                print(f"Warning: Could not load state file: {e}")
-                self.seen_blocks = deque()
-                self.seen_set = set()
+        except Exception as e:
+            print(f"Warning: Could not load state file: {e}")
+            self.seen_blocks = deque()
+            self.seen_set = set()
     
     def save_state(self) -> None:
-        """Save state to file."""
+        """Save state to file using the state module with atomic write."""
         try:
             data = {
                 'seen_blocks': list(self.seen_blocks),
                 'last_updated': datetime.now().isoformat()
             }
-            with open(self.state_file, 'w') as f:
-                json.dump(data, f, indent=2)
+            state.save_state(self.state_file, data)
         except Exception as e:
             print(f"Warning: Could not save state file: {e}")
     
@@ -181,7 +177,7 @@ class BinanceWebSocketClient:
         self.symbols = symbols
         self.timeframes = timeframes
         self.buffers: Dict[Tuple[str, str], KlineBuffer] = {}
-        self.dedup_state = DeduplicationState(STATE_FILE)
+        self.dedup_state = DeduplicationState(config.STATE_FILE)
         
         # Initialize buffers for each symbol/timeframe pair
         for symbol in symbols:
@@ -293,9 +289,15 @@ class BinanceWebSocketClient:
             all_blocks = blocks['bullish'] + blocks['bearish']
             
             for block in all_blocks:
+                # Get confidence score
+                score = block.get('score', 0.5)
+                
+                # Filter by minimum confidence score
+                if score < config.WS_NOTIFY_SCORE_MIN:
+                    continue
+                
                 # Create unique key for deduplication using pipe delimiter
                 # Format: symbol|timeframe|index|type|score
-                score = block.get('score', 0.5)
                 score_rounded = round(score, 2)
                 block_key = f"{symbol}|{timeframe}|{block['index']}|{block['type']}|{score_rounded}"
                 

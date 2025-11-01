@@ -8,7 +8,6 @@ import os
 import sys
 import time
 import threading
-from collections import defaultdict
 
 # Add src directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -17,12 +16,14 @@ from src import config
 from src import data_fetcher
 from src import detection
 from src import notifier
+from src import state
 
 
-# Global store for seen blocks (in-memory deduplication)
-# Key format: "{symbol}_{timeframe}_{index}_{type}_{score_rounded}"
-SEEN_BLOCKS = set()
+# Global store for seen blocks (persistent deduplication via state module)
 LOCK = threading.Lock()
+# Load seen blocks from persistent state
+STATE_DATA = state.load_state(config.STATE_FILE)
+SEEN_BLOCKS = set(STATE_DATA.get('seen_blocks', []))
 
 
 def worker_thread(symbol, timeframe):
@@ -49,6 +50,11 @@ def worker_thread(symbol, timeframe):
             for block in all_blocks:
                 # Create unique key for this block (include rounded score for dedup)
                 score = block.get('score', 0.5)
+                
+                # Filter by minimum confidence score (same as WebSocket version)
+                if score < config.WS_NOTIFY_SCORE_MIN:
+                    continue
+                
                 score_rounded = round(score, 2)
                 block_key = f"{symbol}_{timeframe}_{block['index']}_{block['type']}_{score_rounded}"
                 
@@ -57,6 +63,12 @@ def worker_thread(symbol, timeframe):
                     if block_key in SEEN_BLOCKS:
                         continue
                     SEEN_BLOCKS.add(block_key)
+                    
+                    # Save state after adding new block
+                    try:
+                        state.save_state(config.STATE_FILE, {'seen_blocks': list(SEEN_BLOCKS)})
+                    except Exception as e:
+                        print(f"Warning: Could not save state: {e}")
                 
                 # New block detected - send notification
                 message = notifier.format_block_message(symbol, timeframe, block)
@@ -78,6 +90,9 @@ def main():
     print(f"Symbols: {config.SYMBOLS}")
     print(f"Timeframes: {config.TIMEFRAMES}")
     print(f"Poll Interval: {config.POLL_INTERVAL_SEC} seconds")
+    print(f"Minimum Confidence Score: {config.WS_NOTIFY_SCORE_MIN}")
+    if SEEN_BLOCKS:
+        print(f"Loaded {len(SEEN_BLOCKS)} seen blocks from persistent state")
     print()
     
     # Create a thread for each symbol/timeframe combination

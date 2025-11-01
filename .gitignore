@@ -137,3 +137,4 @@ Thumbs.db
 charts/*.png
 !charts/.gitkeep
 .dedup_state.json
+data/state.json
