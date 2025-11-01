@@ -180,7 +180,7 @@ class TestRoundTrip:
             path = os.path.join(tmpdir, 'state.json')
             test_data = {
                 'seen_blocks': ['block1', 'block2', 'block3'],
-                'last_updated': '2025-11-01T10:00:00',
+                'last_updated': '2024-01-01T00:00:00',
                 'count': 3
             }
             

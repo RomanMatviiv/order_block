@@ -18,10 +18,7 @@ def load_state(path: str) -> Dict[str, Any]:
         
     Returns:
         Dictionary containing the state, or empty dict if file doesn't exist
-        
-    Raises:
-        json.JSONDecodeError: If the file contains invalid JSON
-        IOError: If there's an error reading the file
+        or contains invalid JSON
     """
     if not os.path.exists(path):
         return {}
