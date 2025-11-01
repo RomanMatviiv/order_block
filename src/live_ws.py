@@ -116,13 +116,50 @@ class DeduplicationManager:
         self._load_state()
     
     def _load_state(self):
-        """Load deduplication state from file."""
+        """Load deduplication state from file with validation."""
         if self.state_file.exists() and self.state_file.stat().st_size > 0:
             try:
+                # Check file size to prevent memory exhaustion (max 10MB)
+                max_size = 10 * 1024 * 1024  # 10MB
+                if self.state_file.stat().st_size > max_size:
+                    logger.warning(f"State file too large ({self.state_file.stat().st_size} bytes), starting fresh")
+                    self.seen_blocks = set()
+                    return
+                
                 with open(self.state_file, 'r') as f:
                     data = json.load(f)
-                    self.seen_blocks = set(data.get('seen_blocks', []))
+                    
+                    # Validate data structure
+                    if not isinstance(data, dict):
+                        logger.warning("Invalid state file format (not a dict), starting fresh")
+                        self.seen_blocks = set()
+                        return
+                    
+                    seen_blocks_data = data.get('seen_blocks', [])
+                    
+                    # Validate seen_blocks is a list
+                    if not isinstance(seen_blocks_data, list):
+                        logger.warning("Invalid seen_blocks format (not a list), starting fresh")
+                        self.seen_blocks = set()
+                        return
+                    
+                    # Validate all items are strings and limit size
+                    max_items = 100000  # Maximum 100k entries
+                    if len(seen_blocks_data) > max_items:
+                        logger.warning(f"State file has too many entries ({len(seen_blocks_data)}), keeping last {max_items}")
+                        seen_blocks_data = seen_blocks_data[-max_items:]
+                    
+                    # Validate all items are strings
+                    if not all(isinstance(item, str) for item in seen_blocks_data):
+                        logger.warning("Some seen_blocks entries are not strings, filtering invalid entries")
+                        seen_blocks_data = [item for item in seen_blocks_data if isinstance(item, str)]
+                    
+                    self.seen_blocks = set(seen_blocks_data)
                     logger.info(f"Loaded {len(self.seen_blocks)} seen blocks from {self.state_file}")
+                    
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse state file (invalid JSON), starting fresh: {e}")
+                self.seen_blocks = set()
             except Exception as e:
                 logger.warning(f"Failed to load state file, starting fresh: {e}")
                 self.seen_blocks = set()

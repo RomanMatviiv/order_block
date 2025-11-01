@@ -121,6 +121,57 @@ class TestDeduplicationManager:
                 os.remove(state_file)
     
     @pytest.mark.asyncio
+    async def test_load_invalid_json(self):
+        """Test loading a corrupted JSON file."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+            f.write("invalid json content {[")
+            state_file = f.name
+        
+        try:
+            # Should handle gracefully and start with empty set
+            manager = live_ws.DeduplicationManager(state_file)
+            assert len(manager.seen_blocks) == 0
+            
+        finally:
+            if os.path.exists(state_file):
+                os.remove(state_file)
+    
+    @pytest.mark.asyncio
+    async def test_load_invalid_format(self):
+        """Test loading a file with invalid data structure."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+            json.dump({"seen_blocks": "not a list"}, f)
+            state_file = f.name
+        
+        try:
+            # Should handle gracefully and start with empty set
+            manager = live_ws.DeduplicationManager(state_file)
+            assert len(manager.seen_blocks) == 0
+            
+        finally:
+            if os.path.exists(state_file):
+                os.remove(state_file)
+    
+    @pytest.mark.asyncio
+    async def test_load_mixed_types(self):
+        """Test loading a file with mixed types in seen_blocks."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+            json.dump({"seen_blocks": ["valid", 123, "another", None, "good"]}, f)
+            state_file = f.name
+        
+        try:
+            # Should filter out non-string entries
+            manager = live_ws.DeduplicationManager(state_file)
+            assert len(manager.seen_blocks) == 3  # Only "valid", "another", "good"
+            assert "valid" in manager.seen_blocks
+            assert "another" in manager.seen_blocks
+            assert "good" in manager.seen_blocks
+            
+        finally:
+            if os.path.exists(state_file):
+                os.remove(state_file)
+    
+    @pytest.mark.asyncio
     async def test_persistence(self):
         """Test that state persists across manager instances."""
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
@@ -145,7 +196,8 @@ class TestDeduplicationManager:
     @pytest.mark.asyncio
     async def test_load_nonexistent_file(self):
         """Test loading when state file doesn't exist."""
-        state_file = "/tmp/nonexistent_state_file_12345.json"
+        import tempfile
+        state_file = os.path.join(tempfile.gettempdir(), f"nonexistent_state_{os.getpid()}.json")
         
         if os.path.exists(state_file):
             os.remove(state_file)
