@@ -1,8 +1,25 @@
 # src/config.py
 # List of symbols to process. Edit this list to add or remove trading pairs.
 SYMBOLS = [
-    "BTC/USDT",
-    "ETH/USDT",
+    "LINKUSDT",
+    "ADAUSDT",
+    "1000PEPEUSDT",
+    "1000FLOKIUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "TRBUSDT",
+    "AAVEUSDT",
+    "1000SHIBUSDT",
+    "DYDXUSDT",
+    "LDOUSDT",
+    "SUIUSDT",
+    "DODOXUSDT",
+    "JUPUSDT",
+    "TONUSDT",
+    "ZROUSDT",
+    "AEROUSDT",
+    "AVAUSDT",
+    "DOODUSDT",
 ]
 
 # Timeframes to run the detector for (both history and live). Default: 15m and 30m

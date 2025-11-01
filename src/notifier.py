@@ -62,8 +62,8 @@ def send_telegram(message):
     Returns:
         True if successful, False otherwise
     """
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    bot_token = "7903409662:AAEtRB9uDV8500iFd6kEXQpQXmd7lzeopZg" # os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = "-4730782366" #os.getenv('TELEGRAM_CHAT_ID')
     
     if not bot_token or not chat_id:
         print("Warning: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Skipping notification.")
