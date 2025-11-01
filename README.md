@@ -104,7 +104,61 @@ Historical analysis complete!
 
 ### Live Monitoring
 
-Run live order block detection with Telegram notifications:
+The system offers two methods for live monitoring:
+
+#### 1. WebSocket-Based Monitoring (Recommended)
+
+Real-time monitoring using Binance WebSocket streams:
+
+```bash
+python run_live_ws.py
+```
+
+This will:
+- Connect to Binance WebSocket for real-time kline updates
+- Process only closed klines (no incomplete candle data)
+- Maintain a rolling buffer of recent candles per symbol/timeframe
+- Detect new order blocks immediately when candles close
+- Send Telegram notifications for each new detection
+- **Persist deduplication state to disk** (survives restarts)
+- Automatically reconnect on connection failures
+
+Example output:
+```
+============================================================
+Order Block Live Monitoring (WebSocket)
+============================================================
+Symbols: ['BTC/USDT', 'ETH/USDT']
+Timeframes: ['15m', '30m']
+
+Connecting to Binance WebSocket...
+URL: wss://stream.binance.com:9443/stream?streams=btcusdt@kline_15m/btcusdt@kline_30m/ethusdt@kline_15m/ethusdt@kline_30m
+Monitoring 2 symbols on 2 timeframes
+
+✓ Connected to Binance WebSocket
+Listening for kline events... Press Ctrl+C to stop
+============================================================
+
+[BTC/USDT 15m] Buffering data... (25 candles)
+[ETH/USDT 30m] Buffering data... (25 candles)
+
+[BTC/USDT 15m] New bullish order block detected at index 150 (score: 0.73)
+Telegram notification sent successfully
+
+[ETH/USDT 30m] New bearish order block detected at index 85 (score: 0.68)
+Telegram notification sent successfully
+```
+
+**Key advantages of WebSocket approach:**
+- **Real-time updates**: Receives data as soon as candles close
+- **Efficient**: No polling overhead, lower latency
+- **Reliable**: Automatic reconnection with exponential backoff
+- **Persistent deduplication**: State saved to `.dedup_state.json`
+- **Restart-safe**: Won't resend old notifications after restarts
+
+#### 2. Polling-Based Monitoring (Legacy)
+
+Traditional polling method using REST API:
 
 ```bash
 python run_live.py
@@ -115,7 +169,7 @@ This will:
 - Poll Binance every 30 seconds (configurable via `POLL_INTERVAL_SEC`)
 - Detect new order blocks in real-time
 - Send Telegram notifications for each new detection
-- Keep track of notified blocks to avoid duplicates
+- Keep track of notified blocks in memory (lost on restart)
 
 Example output:
 ```
@@ -188,13 +242,19 @@ order_block/
 │   ├── detection.py           # Order block detection algorithm
 │   ├── generate_entry_signals.py  # Entry signal generation
 │   ├── plotter.py             # Chart generation with matplotlib
-│   └── notifier.py            # Telegram notification handling
+│   ├── notifier.py            # Telegram notification handling
+│   └── live_ws.py             # WebSocket-based live monitoring (NEW)
+├── tests/                     # Unit tests
+│   ├── test_detection.py      # Detection algorithm tests
+│   └── test_live_ws.py        # WebSocket functionality tests (NEW)
 ├── charts/                    # Generated charts directory
 ├── run_history.py             # Historical analysis script
-├── run_live.py                # Live monitoring script
+├── run_live.py                # Live monitoring script (polling)
+├── run_live_ws.py             # Live monitoring script (WebSocket, NEW)
 ├── requirements.txt           # Python dependencies
 └── README.md                  # This file
 ```
+
 
 ## Order Block Detection Logic
 
