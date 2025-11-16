@@ -114,7 +114,21 @@ Real-time monitoring using Binance WebSocket streams:
 python run_live_ws.py
 ```
 
+**NEW: Historical Preloading**
+
+The WebSocket mode now automatically preloads historical klines on startup to enable immediate detection. You can control whether historical blocks trigger Telegram notifications:
+
+```bash
+# Default: Mark historical blocks as seen without notifications (prevents spam)
+python run_live_ws.py
+
+# Send Telegram notifications for historical blocks found on startup
+python run_live_ws.py --send-historical
+```
+
 This will:
+- **Preload historical klines** (up to 500 bars per symbol/timeframe) before starting WebSocket
+- **Run detection immediately** on historical data to populate buffers
 - Connect to Binance WebSocket for real-time kline updates
 - Process only closed klines (no incomplete candle data)
 - Maintain a rolling buffer of recent candles per symbol/timeframe
@@ -130,6 +144,22 @@ Order Block Live Monitoring (WebSocket)
 ============================================================
 Symbols: ['BTC/USDT', 'ETH/USDT']
 Timeframes: ['15m', '30m']
+Send Historical Notifications: False
+
+============================================================
+Preloading historical data...
+============================================================
+[BTC/USDT 15m] Fetching 500 historical klines...
+[BTC/USDT 15m] Fetched 500 klines
+[BTC/USDT 15m] Running detection on historical data...
+[BTC/USDT 15m] Marked 3 historical blocks as seen (no notifications)
+[BTC/USDT 30m] Fetching 500 historical klines...
+[BTC/USDT 30m] Fetched 500 klines
+[BTC/USDT 30m] Running detection on historical data...
+[BTC/USDT 30m] Marked 2 historical blocks as seen (no notifications)
+============================================================
+Historical data preloading complete!
+============================================================
 
 Connecting to Binance WebSocket...
 URL: wss://stream.binance.com:9443/stream?streams=btcusdt@kline_15m/btcusdt@kline_30m/ethusdt@kline_15m/ethusdt@kline_30m
@@ -139,9 +169,6 @@ Monitoring 2 symbols on 2 timeframes
 Listening for kline events... Press Ctrl+C to stop
 ============================================================
 
-[BTC/USDT 15m] Buffering data... (25 candles)
-[ETH/USDT 30m] Buffering data... (25 candles)
-
 [BTC/USDT 15m] New bullish order block detected at index 150 (score: 0.73)
 Telegram notification sent successfully
 
@@ -150,11 +177,13 @@ Telegram notification sent successfully
 ```
 
 **Key advantages of WebSocket approach:**
+- **Immediate detection**: Historical preloading enables detection from the first moment
 - **Real-time updates**: Receives data as soon as candles close
 - **Efficient**: No polling overhead, lower latency
 - **Reliable**: Automatic reconnection with exponential backoff
-- **Persistent deduplication**: State saved to `.dedup_state.json`
+- **Persistent deduplication**: State saved to `data/state.json`
 - **Restart-safe**: Won't resend old notifications after restarts
+- **Smart historical handling**: Control whether to notify about historical blocks on startup
 
 #### 2. Polling-Based Monitoring (Legacy)
 

@@ -8,7 +8,8 @@ import json
 import os
 import websockets
 import pandas as pd
-from typing import Dict, Set, Tuple
+import requests
+from typing import Dict, Set, Tuple, Optional
 from datetime import datetime
 from collections import defaultdict, deque
 
@@ -169,16 +170,18 @@ class DeduplicationState:
 class BinanceWebSocketClient:
     """WebSocket client for Binance kline streams."""
     
-    def __init__(self, symbols: list, timeframes: list):
+    def __init__(self, symbols: list, timeframes: list, max_bars: int = None):
         """
         Initialize WebSocket client.
         
         Args:
             symbols: List of trading pairs (e.g., ["BTC/USDT", "ETH/USDT"])
             timeframes: List of timeframes (e.g., ["15m", "30m"])
+            max_bars: Maximum number of bars to keep in buffer (defaults to config.WS_MAX_BARS)
         """
         self.symbols = symbols
         self.timeframes = timeframes
+        self.max_bars = max_bars or config.WS_MAX_BARS
         self.buffers: Dict[Tuple[str, str], KlineBuffer] = {}
         self.dedup_state = DeduplicationState(config.STATE_FILE)
         
@@ -186,7 +189,7 @@ class BinanceWebSocketClient:
         for symbol in symbols:
             for timeframe in timeframes:
                 key = (symbol, timeframe)
-                self.buffers[key] = KlineBuffer(max_candles=config.WS_MAX_BARS)
+                self.buffers[key] = KlineBuffer(max_candles=self.max_bars)
     
     def get_stream_names(self) -> list:
         """
@@ -246,6 +249,159 @@ class BinanceWebSocketClient:
                 return (symbol, timeframe)
         
         raise ValueError(f"Unknown symbol: {binance_symbol}")
+    
+    def fetch_historical_klines(self, symbol: str, timeframe: str, limit: int = None) -> pd.DataFrame:
+        """
+        Fetch historical klines from Binance REST API.
+        
+        Args:
+            symbol: Trading pair symbol (e.g., "BTC/USDT")
+            timeframe: Timeframe string (e.g., "15m", "30m")
+            limit: Number of klines to fetch (defaults to self.max_bars)
+            
+        Returns:
+            DataFrame with OHLCV data
+        """
+        if limit is None:
+            limit = self.max_bars
+        
+        # Convert symbol format: "BTC/USDT" -> "BTCUSDT"
+        binance_symbol = symbol.replace('/', '')
+        
+        # Build URL
+        url = f"https://api.binance.com/api/v3/klines"
+        params = {
+            'symbol': binance_symbol,
+            'interval': timeframe,
+            'limit': limit
+        }
+        
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            klines = response.json()
+            
+            # Convert to DataFrame
+            # Binance kline format: [open_time, open, high, low, close, volume, close_time, ...]
+            if not klines:
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(klines, columns=[
+                'open_time', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+                'taker_buy_quote', 'ignore'
+            ])
+            
+            # Convert types and select only needed columns
+            df['timestamp'] = pd.to_datetime(df['open_time'], unit='ms')
+            df['open'] = df['open'].astype(float)
+            df['high'] = df['high'].astype(float)
+            df['low'] = df['low'].astype(float)
+            df['close'] = df['close'].astype(float)
+            df['volume'] = df['volume'].astype(float)
+            
+            # Return only OHLCV columns
+            return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        
+        except Exception as e:
+            print(f"Error fetching historical klines for {symbol} {timeframe}: {e}")
+            return pd.DataFrame()
+    
+    def preload_historical_data(self, send_historical: bool = False) -> None:
+        """
+        Preload historical klines into buffers and run initial detection.
+        
+        Args:
+            send_historical: If True, send Telegram notifications for historical blocks.
+                           If False, mark historical blocks as seen without notifications.
+        """
+        print("=" * 60)
+        print("Preloading historical data...")
+        print("=" * 60)
+        
+        for symbol in self.symbols:
+            for timeframe in self.timeframes:
+                buffer_key = (symbol, timeframe)
+                
+                print(f"[{symbol} {timeframe}] Fetching {self.max_bars} historical klines...")
+                
+                # Fetch historical data
+                df = self.fetch_historical_klines(symbol, timeframe, self.max_bars)
+                
+                if df.empty:
+                    print(f"[{symbol} {timeframe}] Warning: No historical data fetched")
+                    continue
+                
+                print(f"[{symbol} {timeframe}] Fetched {len(df)} klines")
+                
+                # Populate buffer with historical data
+                buffer = self.buffers[buffer_key]
+                for _, row in df.iterrows():
+                    # Convert DataFrame row to kline format expected by buffer
+                    kline_data = {
+                        't': int(row['timestamp'].timestamp() * 1000),
+                        'o': str(row['open']),
+                        'h': str(row['high']),
+                        'l': str(row['low']),
+                        'c': str(row['close']),
+                        'v': str(row['volume'])
+                    }
+                    buffer.add_kline(kline_data)
+                
+                # Check if buffer is ready for detection
+                if not buffer.is_ready():
+                    print(f"[{symbol} {timeframe}] Buffer not ready for detection (need {config.ATR_PERIOD + config.DETECTION_LOOKAHEAD + 1} candles)")
+                    continue
+                
+                # Run detection on historical data
+                print(f"[{symbol} {timeframe}] Running detection on historical data...")
+                df_buffer = buffer.get_dataframe()
+                blocks = detection.detect_order_blocks(df_buffer)
+                
+                # Process detected blocks
+                all_blocks = blocks['bullish'] + blocks['bearish']
+                historical_blocks_count = 0
+                notified_count = 0
+                
+                for block in all_blocks:
+                    # Create unique key for deduplication
+                    score = block.get('score', 0.5)
+                    score_rounded = round(score, 2)
+                    
+                    # Skip blocks below minimum score threshold
+                    if score < config.WS_NOTIFY_SCORE_MIN:
+                        continue
+                    
+                    block_key = f"{symbol}|{timeframe}|{block['index']}|{block['type']}|{score_rounded}"
+                    
+                    # Check if already seen
+                    if self.dedup_state.is_seen(block_key):
+                        continue
+                    
+                    historical_blocks_count += 1
+                    
+                    if send_historical:
+                        # Send notification for historical block
+                        message_text = notifier.format_block_message(symbol, timeframe, block)
+                        print(f"[{symbol} {timeframe}] Historical {block['type']} order block at index {block['index']} (score: {score:.2f})")
+                        notifier.send_telegram(message_text)
+                        notified_count += 1
+                    
+                    # Mark as seen
+                    self.dedup_state.mark_seen(block_key)
+                
+                if send_historical:
+                    print(f"[{symbol} {timeframe}] Sent {notified_count} historical notifications")
+                else:
+                    print(f"[{symbol} {timeframe}] Marked {historical_blocks_count} historical blocks as seen (no notifications)")
+        
+        # Save state after preloading
+        self.dedup_state.save_state()
+        
+        print("=" * 60)
+        print("Historical data preloading complete!")
+        print("=" * 60)
+        print()
     
     async def process_kline(self, message: Dict) -> None:
         """
@@ -322,8 +478,16 @@ class BinanceWebSocketClient:
         except Exception as e:
             print(f"Error processing kline: {e}")
     
-    async def connect_and_listen(self) -> None:
-        """Connect to WebSocket and listen for messages."""
+    async def connect_and_listen(self, send_historical: bool = False) -> None:
+        """
+        Connect to WebSocket and listen for messages.
+        
+        Args:
+            send_historical: If True, send Telegram notifications for historical blocks on startup.
+        """
+        # Preload historical data before connecting to WebSocket
+        self.preload_historical_data(send_historical=send_historical)
+        
         url = self.get_websocket_url()
         print(f"Connecting to Binance WebSocket...")
         print(f"URL: {url}")
@@ -367,26 +531,37 @@ class BinanceWebSocketClient:
                 retry_delay = min(retry_delay * 2, max_retry_delay)
 
 
-async def run_live_ws():
-    """Main function to run WebSocket-based live detection."""
+async def run_live_ws(send_historical: bool = False):
+    """
+    Main function to run WebSocket-based live detection.
+    
+    Args:
+        send_historical: If True, send Telegram notifications for historical blocks on startup.
+    """
     print("=" * 60)
     print("Order Block Live Monitoring (WebSocket)")
     print("=" * 60)
     print(f"Symbols: {config.SYMBOLS}")
     print(f"Timeframes: {config.TIMEFRAMES}")
+    print(f"Send Historical Notifications: {send_historical}")
     print()
     
     # Create WebSocket client
     client = BinanceWebSocketClient(config.SYMBOLS, config.TIMEFRAMES)
     
     # Connect and listen
-    await client.connect_and_listen()
+    await client.connect_and_listen(send_historical=send_historical)
 
 
-def main():
-    """Entry point for WebSocket-based live monitoring."""
+def main(send_historical: bool = False):
+    """
+    Entry point for WebSocket-based live monitoring.
+    
+    Args:
+        send_historical: If True, send Telegram notifications for historical blocks on startup.
+    """
     try:
-        asyncio.run(run_live_ws())
+        asyncio.run(run_live_ws(send_historical=send_historical))
     except KeyboardInterrupt:
         print("\n\nStopping live monitoring...")
 

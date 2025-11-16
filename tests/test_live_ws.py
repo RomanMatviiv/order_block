@@ -6,6 +6,7 @@ import os
 import pytest
 import json
 import tempfile
+import pandas as pd
 from unittest.mock import Mock, patch, MagicMock
 
 # Add parent directory to path
@@ -414,6 +415,199 @@ class TestBinanceWebSocketClient:
         # Only blocks with score >= WS_NOTIFY_SCORE_MIN should be notified
         # That's 2 blocks (0.25 and 0.75)
         assert mock_send_telegram.call_count == 2
+
+
+class TestHistoricalPreloading:
+    """Test historical data preloading functionality."""
+    
+    @patch('src.live_ws.requests.get')
+    def test_fetch_historical_klines(self, mock_get):
+        """Test fetching historical klines from Binance REST API."""
+        symbols = ["BTC/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Mock successful API response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            [1609459200000, '29000', '29100', '28900', '29050', '100.5', 
+             1609459259999, '2905000', 100, '50', '1452500', '0'],
+            [1609459260000, '29050', '29150', '28950', '29100', '110.2',
+             1609459319999, '3205000', 120, '60', '1763000', '0']
+        ]
+        mock_get.return_value = mock_response
+        
+        # Fetch historical data
+        df = client.fetch_historical_klines("BTC/USDT", "15m", limit=2)
+        
+        # Verify API was called correctly
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert call_args[0][0] == "https://api.binance.com/api/v3/klines"
+        assert call_args[1]['params']['symbol'] == 'BTCUSDT'
+        assert call_args[1]['params']['interval'] == '15m'
+        assert call_args[1]['params']['limit'] == 2
+        
+        # Verify DataFrame structure
+        assert len(df) == 2
+        assert 'timestamp' in df.columns
+        assert 'open' in df.columns
+        assert 'high' in df.columns
+        assert 'low' in df.columns
+        assert 'close' in df.columns
+        assert 'volume' in df.columns
+        
+        # Verify data types
+        assert df['open'].dtype == float
+        assert df['high'].dtype == float
+        assert df['low'].dtype == float
+        assert df['close'].dtype == float
+        assert df['volume'].dtype == float
+    
+    @patch('src.live_ws.requests.get')
+    def test_fetch_historical_klines_error(self, mock_get):
+        """Test error handling when fetching historical klines fails."""
+        symbols = ["BTC/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Mock API error
+        mock_get.side_effect = Exception("API error")
+        
+        # Fetch should return empty DataFrame on error
+        df = client.fetch_historical_klines("BTC/USDT", "15m", limit=2)
+        
+        assert df.empty
+    
+    @patch('src.live_ws.notifier.send_telegram')
+    @patch('src.live_ws.detection.detect_order_blocks')
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_historical_klines')
+    def test_preload_historical_data_no_notifications(self, mock_fetch, mock_detect, mock_send_telegram):
+        """Test preloading historical data without sending notifications."""
+        symbols = ["BTC/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Mock historical data
+        historical_data = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15T'),
+            'open': [29000.0 + i for i in range(30)],
+            'high': [29100.0 + i for i in range(30)],
+            'low': [28900.0 + i for i in range(30)],
+            'close': [29050.0 + i for i in range(30)],
+            'volume': [100.0] * 30
+        })
+        mock_fetch.return_value = historical_data
+        
+        # Mock detection to return blocks
+        mock_detect.return_value = {
+            'bullish': [
+                {'index': 10, 'type': 'bullish', 'score': 0.75, 'low': 28900, 'high': 29100}
+            ],
+            'bearish': []
+        }
+        
+        # Preload without sending notifications
+        client.preload_historical_data(send_historical=False)
+        
+        # Verify fetch was called
+        mock_fetch.assert_called_once_with("BTC/USDT", "15m", 500)
+        
+        # Verify buffer was populated
+        buffer = client.buffers[("BTC/USDT", "15m")]
+        assert len(buffer.klines) == 30
+        
+        # Verify no notifications were sent
+        mock_send_telegram.assert_not_called()
+        
+        # Verify block was marked as seen
+        assert client.dedup_state.is_seen("BTC/USDT|15m|10|bullish|0.75")
+    
+    @patch('src.live_ws.notifier.send_telegram')
+    @patch('src.live_ws.notifier.format_block_message')
+    @patch('src.live_ws.detection.detect_order_blocks')
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_historical_klines')
+    def test_preload_historical_data_with_notifications(self, mock_fetch, mock_detect, 
+                                                       mock_format, mock_send_telegram):
+        """Test preloading historical data with sending notifications."""
+        symbols = ["BTC/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Mock historical data
+        historical_data = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15T'),
+            'open': [29000.0 + i for i in range(30)],
+            'high': [29100.0 + i for i in range(30)],
+            'low': [28900.0 + i for i in range(30)],
+            'close': [29050.0 + i for i in range(30)],
+            'volume': [100.0] * 30
+        })
+        mock_fetch.return_value = historical_data
+        
+        # Mock detection to return blocks
+        mock_detect.return_value = {
+            'bullish': [
+                {'index': 10, 'type': 'bullish', 'score': 0.75, 'low': 28900, 'high': 29100}
+            ],
+            'bearish': [
+                {'index': 15, 'type': 'bearish', 'score': 0.60, 'low': 28950, 'high': 29150}
+            ]
+        }
+        mock_format.return_value = "Test message"
+        
+        # Preload with sending notifications
+        client.preload_historical_data(send_historical=True)
+        
+        # Verify notifications were sent
+        assert mock_send_telegram.call_count == 2
+        assert mock_format.call_count == 2
+        
+        # Verify blocks were marked as seen
+        assert client.dedup_state.is_seen("BTC/USDT|15m|10|bullish|0.75")
+        assert client.dedup_state.is_seen("BTC/USDT|15m|15|bearish|0.6")
+    
+    @patch('src.live_ws.notifier.send_telegram')
+    @patch('src.live_ws.detection.detect_order_blocks')
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_historical_klines')
+    def test_preload_filters_low_score_blocks(self, mock_fetch, mock_detect, mock_send_telegram):
+        """Test that preloading filters blocks below score threshold."""
+        symbols = ["BTC/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Mock historical data
+        historical_data = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15T'),
+            'open': [29000.0 + i for i in range(30)],
+            'high': [29100.0 + i for i in range(30)],
+            'low': [28900.0 + i for i in range(30)],
+            'close': [29050.0 + i for i in range(30)],
+            'volume': [100.0] * 30
+        })
+        mock_fetch.return_value = historical_data
+        
+        # Mock detection to return blocks with different scores
+        mock_detect.return_value = {
+            'bullish': [
+                {'index': 10, 'type': 'bullish', 'score': 0.75, 'low': 28900, 'high': 29100},
+                {'index': 11, 'type': 'bullish', 'score': 0.10, 'low': 28900, 'high': 29100}  # Below threshold
+            ],
+            'bearish': []
+        }
+        
+        # Preload without sending notifications
+        client.preload_historical_data(send_historical=False)
+        
+        # Only the high-score block should be marked as seen
+        assert client.dedup_state.is_seen("BTC/USDT|15m|10|bullish|0.75")
+        assert not client.dedup_state.is_seen("BTC/USDT|15m|11|bullish|0.1")
 
 
 if __name__ == '__main__':
