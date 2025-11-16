@@ -217,7 +217,7 @@ class BinanceWebSocketClient:
         """
         streams = self.get_stream_names()
         streams_param = '/'.join(streams)
-        return f"wss://stream.binance.com:9443/stream?streams={streams_param}"
+        return f"{config.WS_BASE}/stream?streams={streams_param}"
     
     def parse_symbol_from_stream(self, stream_name: str) -> Tuple[str, str]:
         """
@@ -250,9 +250,35 @@ class BinanceWebSocketClient:
         
         raise ValueError(f"Unknown symbol: {binance_symbol}")
     
+    def fetch_exchange_info(self) -> Set[str]:
+        """
+        Fetch available symbols from Binance Futures exchangeInfo API.
+        
+        Returns:
+            Set of valid symbol names (e.g., {"BTCUSDT", "ETHUSDT"})
+        """
+        url = f"{config.REST_BASE}/fapi/v1/exchangeInfo"
+        
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract symbols with status TRADING
+            valid_symbols = set()
+            for symbol_info in data.get('symbols', []):
+                if symbol_info.get('status') == 'TRADING':
+                    valid_symbols.add(symbol_info['symbol'])
+            
+            return valid_symbols
+        
+        except Exception as e:
+            print(f"Warning: Could not fetch exchangeInfo: {e}")
+            return set()
+    
     def fetch_historical_klines(self, symbol: str, timeframe: str, limit: int = None) -> pd.DataFrame:
         """
-        Fetch historical klines from Binance REST API.
+        Fetch historical klines from Binance Futures REST API.
         
         Args:
             symbol: Trading pair symbol (e.g., "BTC/USDT")
@@ -268,8 +294,8 @@ class BinanceWebSocketClient:
         # Convert symbol format: "BTC/USDT" -> "BTCUSDT"
         binance_symbol = symbol.replace('/', '')
         
-        # Build URL
-        url = f"https://api.binance.com/api/v3/klines"
+        # Build URL for Binance Futures API
+        url = f"{config.REST_BASE}/fapi/v1/klines"
         params = {
             'symbol': binance_symbol,
             'interval': timeframe,
@@ -319,7 +345,21 @@ class BinanceWebSocketClient:
         print("Preloading historical data...")
         print("=" * 60)
         
+        # Fetch valid symbols from exchangeInfo
+        valid_symbols = self.fetch_exchange_info()
+        
+        if valid_symbols:
+            print(f"Fetched {len(valid_symbols)} valid symbols from Binance Futures exchangeInfo")
+        else:
+            print("Warning: Could not fetch exchangeInfo, will attempt all configured symbols")
+        
         for symbol in self.symbols:
+            # Check if symbol is supported (skip gracefully if not)
+            binance_symbol = symbol.replace('/', '')
+            if valid_symbols and binance_symbol not in valid_symbols:
+                print(f"[{symbol}] Skipping - not available on Binance Futures")
+                continue
+            
             for timeframe in self.timeframes:
                 buffer_key = (symbol, timeframe)
                 
