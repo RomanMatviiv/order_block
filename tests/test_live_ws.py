@@ -222,6 +222,12 @@ class TestBinanceWebSocketClient:
         assert len(client.buffers) == 4  # 2 symbols × 2 timeframes
         assert ("BTC/USDT", "15m") in client.buffers
         assert ("ETH/USDT", "30m") in client.buffers
+        
+        # Verify config values are being used
+        for buffer in client.buffers.values():
+            assert buffer.max_candles == config.WS_MAX_BARS
+        
+        assert client.dedup_state.state_file == config.STATE_FILE
     
     def test_get_stream_names(self):
         """Test stream name generation."""
@@ -345,6 +351,69 @@ class TestBinanceWebSocketClient:
         
         # Detection should not have been called
         mock_detect.assert_not_called()
+    
+    @pytest.mark.asyncio
+    @patch('src.live_ws.detection.detect_order_blocks')
+    @patch('src.live_ws.notifier.send_telegram')
+    @patch('src.live_ws.notifier.format_block_message')
+    async def test_score_filtering(self, mock_format, mock_send_telegram, mock_detect):
+        """Test that blocks below score threshold are filtered."""
+        symbols = ["BTC/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Fill buffer with enough data
+        for i in range(30):
+            kline_data = {
+                't': 1609459200000 + i * 60000,
+                'o': f'{29000 + i}.00',
+                'h': f'{29100 + i}.00',
+                'l': f'{28900 + i}.00',
+                'c': f'{29050 + i}.00',
+                'v': '100.0',
+                'x': True
+            }
+            message = {
+                'stream': 'btcusdt@kline_15m',
+                'data': {'k': kline_data}
+            }
+            client.buffers[("BTC/USDT", "15m")].add_kline(kline_data)
+        
+        # Mock detection to return blocks with different scores
+        mock_detect.return_value = {
+            'bullish': [
+                {'index': 100, 'type': 'bullish', 'score': 0.10},  # Below threshold
+                {'index': 101, 'type': 'bullish', 'score': 0.25},  # At threshold
+                {'index': 102, 'type': 'bullish', 'score': 0.75},  # Above threshold
+            ],
+            'bearish': [
+                {'index': 103, 'type': 'bearish', 'score': 0.15},  # Below threshold
+            ]
+        }
+        mock_format.return_value = "Test message"
+        
+        # Process a closed kline
+        message = {
+            'stream': 'btcusdt@kline_15m',
+            'data': {
+                'k': {
+                    't': 1609459200000,
+                    'o': '29000.00',
+                    'h': '29100.00',
+                    'l': '28900.00',
+                    'c': '29050.00',
+                    'v': '100.5',
+                    'x': True
+                }
+            }
+        }
+        
+        await client.process_kline(message)
+        
+        # Only blocks with score >= WS_NOTIFY_SCORE_MIN should be notified
+        # That's 2 blocks (0.25 and 0.75)
+        assert mock_send_telegram.call_count == 2
 
 
 if __name__ == '__main__':
