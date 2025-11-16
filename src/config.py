@@ -1,4 +1,20 @@
 # src/config.py
+
+# ========================================
+# Binance API Configuration
+# ========================================
+# API type - set to 'futures' for USDT-margined perpetual futures
+BINANCE_API = 'futures'
+
+# REST API base URL for Binance Futures
+REST_BASE = 'https://fapi.binance.com'
+
+# WebSocket base URL for Binance Futures streams
+WS_BASE = 'wss://fstream.binance.com'
+
+# ========================================
+# Symbol Configuration
+# ========================================
 # List of symbols to process. Edit this list to add or remove trading pairs.
 SYMBOLS = [
     "LINKUSDT",

@@ -4,12 +4,30 @@ A Python-based trading tool for detecting order blocks in cryptocurrency markets
 
 ## Features
 
+- **Binance Futures Support**: Configured to work with USDT-margined perpetual futures
 - **Multi-Symbol Support**: Configure multiple trading pairs to monitor simultaneously
 - **Multi-Timeframe Analysis**: Run detection on 15m and 30m timeframes (configurable)
 - **Historical Analysis**: Fetch historical data and generate charts showing detected order blocks
 - **Live Monitoring**: Real-time detection with parallel workers for each symbol/timeframe combination
 - **Telegram Notifications**: Instant alerts when new order blocks are detected
 - **Deduplication**: Smart tracking to avoid sending duplicate notifications
+
+## Binance Futures API
+
+This system is configured to use **Binance USDT-margined Futures (perpetual contracts)** for both historical and live data:
+
+- **REST API Base URL**: `https://fapi.binance.com`
+- **WebSocket Base URL**: `wss://fstream.binance.com`
+- **Endpoints Used**:
+  - `/fapi/v1/klines` - Historical and real-time kline/candlestick data
+  - `/fapi/v1/exchangeInfo` - Symbol validation and trading status
+
+The system automatically:
+- Validates symbols against the Binance Futures exchangeInfo endpoint
+- Skips symbols that are not available on Binance Futures
+- Uses futures-specific WebSocket streams for real-time data
+
+> **Note**: Binance Futures is different from Binance Spot. Make sure your symbols are available on Binance Futures. The system will gracefully skip any symbols that are not supported.
 
 ## Installation
 
@@ -35,10 +53,15 @@ export TELEGRAM_CHAT_ID="your_chat_id_here"
 Edit `src/config.py` to customize the symbols and timeframes to monitor:
 
 ```python
+# Binance API Configuration
+BINANCE_API = 'futures'  # API type (futures for USDT-margined perpetual)
+REST_BASE = 'https://fapi.binance.com'  # Futures REST API base URL
+WS_BASE = 'wss://fstream.binance.com'  # Futures WebSocket base URL
+
 # List of symbols to process
 SYMBOLS = [
-    "BTC/USDT",
-    "ETH/USDT",
+    "LINKUSDT",
+    "ADAUSDT",
     # Add more symbols here
 ]
 
@@ -55,13 +78,18 @@ To add new trading pairs, simply add them to the `SYMBOLS` list in `src/config.p
 
 ```python
 SYMBOLS = [
-    "BTC/USDT",
-    "ETH/USDT",
-    "BNB/USDT",
-    "SOL/USDT",
-    "ADA/USDT",
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "ADAUSDT",
 ]
 ```
+
+**Important**: 
+- Use the Binance Futures symbol format (e.g., `BTCUSDT`, not `BTC/USDT`)
+- Ensure the symbol exists on Binance Futures (the system will skip unsupported symbols automatically)
+- Some symbols on Binance Spot may not be available on Binance Futures
 
 ## Usage
 
@@ -108,7 +136,7 @@ The system offers two methods for live monitoring:
 
 #### 1. WebSocket-Based Monitoring (Recommended)
 
-Real-time monitoring using Binance WebSocket streams:
+Real-time monitoring using Binance Futures WebSocket streams:
 
 ```bash
 python run_live_ws.py
@@ -127,9 +155,11 @@ python run_live_ws.py --send-historical
 ```
 
 This will:
-- **Preload historical klines** (up to 500 bars per symbol/timeframe) before starting WebSocket
+- **Validate symbols** against Binance Futures exchangeInfo endpoint
+- **Skip unsupported symbols** gracefully (e.g., symbols only on Spot)
+- **Preload historical klines** (up to 500 bars per symbol/timeframe) via Futures REST API
 - **Run detection immediately** on historical data to populate buffers
-- Connect to Binance WebSocket for real-time kline updates
+- Connect to Binance Futures WebSocket (`wss://fstream.binance.com`) for real-time kline updates
 - Process only closed klines (no incomplete candle data)
 - Maintain a rolling buffer of recent candles per symbol/timeframe
 - Detect new order blocks immediately when candles close
@@ -161,11 +191,11 @@ Preloading historical data...
 Historical data preloading complete!
 ============================================================
 
-Connecting to Binance WebSocket...
-URL: wss://stream.binance.com:9443/stream?streams=btcusdt@kline_15m/btcusdt@kline_30m/ethusdt@kline_15m/ethusdt@kline_30m
+Connecting to Binance Futures WebSocket...
+URL: wss://fstream.binance.com/stream?streams=btcusdt@kline_15m/btcusdt@kline_30m/ethusdt@kline_15m/ethusdt@kline_30m
 Monitoring 2 symbols on 2 timeframes
 
-✓ Connected to Binance WebSocket
+✓ Connected to Binance Futures WebSocket
 Listening for kline events... Press Ctrl+C to stop
 ============================================================
 
@@ -177,6 +207,8 @@ Telegram notification sent successfully
 ```
 
 **Key advantages of WebSocket approach:**
+- **Futures-specific**: Uses Binance USDT-margined Futures data exclusively
+- **Symbol validation**: Automatically checks and skips unsupported symbols
 - **Immediate detection**: Historical preloading enables detection from the first moment
 - **Real-time updates**: Receives data as soon as candles close
 - **Efficient**: No polling overhead, lower latency

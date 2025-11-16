@@ -252,7 +252,7 @@ class TestBinanceWebSocketClient:
         client = live_ws.BinanceWebSocketClient(symbols, timeframes)
         url = client.get_websocket_url()
         
-        assert url.startswith("wss://stream.binance.com:9443/stream?streams=")
+        assert url.startswith(f"{config.WS_BASE}/stream?streams=")
         assert "btcusdt@kline_15m" in url
     
     def test_parse_symbol_from_stream(self):
@@ -422,7 +422,7 @@ class TestHistoricalPreloading:
     
     @patch('src.live_ws.requests.get')
     def test_fetch_historical_klines(self, mock_get):
-        """Test fetching historical klines from Binance REST API."""
+        """Test fetching historical klines from Binance Futures REST API."""
         symbols = ["BTC/USDT"]
         timeframes = ["15m"]
         
@@ -445,7 +445,7 @@ class TestHistoricalPreloading:
         # Verify API was called correctly
         mock_get.assert_called_once()
         call_args = mock_get.call_args
-        assert call_args[0][0] == "https://api.binance.com/api/v3/klines"
+        assert call_args[0][0] == f"{config.REST_BASE}/fapi/v1/klines"
         assert call_args[1]['params']['symbol'] == 'BTCUSDT'
         assert call_args[1]['params']['interval'] == '15m'
         assert call_args[1]['params']['limit'] == 2
@@ -485,16 +485,20 @@ class TestHistoricalPreloading:
     @patch('src.live_ws.notifier.send_telegram')
     @patch('src.live_ws.detection.detect_order_blocks')
     @patch('src.live_ws.BinanceWebSocketClient.fetch_historical_klines')
-    def test_preload_historical_data_no_notifications(self, mock_fetch, mock_detect, mock_send_telegram):
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_exchange_info')
+    def test_preload_historical_data_no_notifications(self, mock_exchange_info, mock_fetch, mock_detect, mock_send_telegram):
         """Test preloading historical data without sending notifications."""
         symbols = ["BTC/USDT"]
         timeframes = ["15m"]
         
         client = live_ws.BinanceWebSocketClient(symbols, timeframes)
         
+        # Mock exchange info to return valid symbols
+        mock_exchange_info.return_value = {"BTCUSDT"}
+        
         # Mock historical data
         historical_data = pd.DataFrame({
-            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15T'),
+            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15min'),
             'open': [29000.0 + i for i in range(30)],
             'high': [29100.0 + i for i in range(30)],
             'low': [28900.0 + i for i in range(30)],
@@ -514,6 +518,9 @@ class TestHistoricalPreloading:
         # Preload without sending notifications
         client.preload_historical_data(send_historical=False)
         
+        # Verify exchange info was called
+        mock_exchange_info.assert_called_once()
+        
         # Verify fetch was called
         mock_fetch.assert_called_once_with("BTC/USDT", "15m", 500)
         
@@ -531,7 +538,8 @@ class TestHistoricalPreloading:
     @patch('src.live_ws.notifier.format_block_message')
     @patch('src.live_ws.detection.detect_order_blocks')
     @patch('src.live_ws.BinanceWebSocketClient.fetch_historical_klines')
-    def test_preload_historical_data_with_notifications(self, mock_fetch, mock_detect, 
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_exchange_info')
+    def test_preload_historical_data_with_notifications(self, mock_exchange_info, mock_fetch, mock_detect, 
                                                        mock_format, mock_send_telegram):
         """Test preloading historical data with sending notifications."""
         symbols = ["BTC/USDT"]
@@ -539,9 +547,12 @@ class TestHistoricalPreloading:
         
         client = live_ws.BinanceWebSocketClient(symbols, timeframes)
         
+        # Mock exchange info to return valid symbols
+        mock_exchange_info.return_value = {"BTCUSDT"}
+        
         # Mock historical data
         historical_data = pd.DataFrame({
-            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15T'),
+            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15min'),
             'open': [29000.0 + i for i in range(30)],
             'high': [29100.0 + i for i in range(30)],
             'low': [28900.0 + i for i in range(30)],
@@ -572,19 +583,89 @@ class TestHistoricalPreloading:
         assert client.dedup_state.is_seen("BTC/USDT|15m|10|bullish|0.75")
         assert client.dedup_state.is_seen("BTC/USDT|15m|15|bearish|0.6")
     
+    @patch('src.live_ws.requests.get')
+    def test_fetch_exchange_info(self, mock_get):
+        """Test fetching exchange info from Binance Futures API."""
+        symbols = ["BTC/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Mock successful API response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'symbols': [
+                {'symbol': 'BTCUSDT', 'status': 'TRADING'},
+                {'symbol': 'ETHUSDT', 'status': 'TRADING'},
+                {'symbol': 'LINKUSDT', 'status': 'BREAK'},  # Not trading
+            ]
+        }
+        mock_get.return_value = mock_response
+        
+        # Fetch exchange info
+        valid_symbols = client.fetch_exchange_info()
+        
+        # Verify API was called correctly
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert call_args[0][0] == f"{config.REST_BASE}/fapi/v1/exchangeInfo"
+        
+        # Verify only TRADING symbols are returned
+        assert valid_symbols == {'BTCUSDT', 'ETHUSDT'}
+        assert 'LINKUSDT' not in valid_symbols
+    
     @patch('src.live_ws.notifier.send_telegram')
     @patch('src.live_ws.detection.detect_order_blocks')
     @patch('src.live_ws.BinanceWebSocketClient.fetch_historical_klines')
-    def test_preload_filters_low_score_blocks(self, mock_fetch, mock_detect, mock_send_telegram):
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_exchange_info')
+    def test_preload_skips_unsupported_symbols(self, mock_exchange_info, mock_fetch, mock_detect, mock_send_telegram):
+        """Test that preloading skips symbols not available on Binance Futures."""
+        symbols = ["BTC/USDT", "UNSUPPORTED/USDT"]
+        timeframes = ["15m"]
+        
+        client = live_ws.BinanceWebSocketClient(symbols, timeframes)
+        
+        # Mock exchange info to return only BTCUSDT as valid
+        mock_exchange_info.return_value = {"BTCUSDT"}
+        
+        # Mock historical data
+        historical_data = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15min'),
+            'open': [29000.0 + i for i in range(30)],
+            'high': [29100.0 + i for i in range(30)],
+            'low': [28900.0 + i for i in range(30)],
+            'close': [29050.0 + i for i in range(30)],
+            'volume': [100.0] * 30
+        })
+        mock_fetch.return_value = historical_data
+        
+        # Mock detection to return no blocks
+        mock_detect.return_value = {'bullish': [], 'bearish': []}
+        
+        # Preload without sending notifications
+        client.preload_historical_data(send_historical=False)
+        
+        # Verify fetch was only called for BTC/USDT (not for UNSUPPORTED/USDT)
+        mock_fetch.assert_called_once_with("BTC/USDT", "15m", 500)
+    
+    @patch('src.live_ws.notifier.send_telegram')
+    @patch('src.live_ws.detection.detect_order_blocks')
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_historical_klines')
+    @patch('src.live_ws.BinanceWebSocketClient.fetch_exchange_info')
+    def test_preload_filters_low_score_blocks(self, mock_exchange_info, mock_fetch, mock_detect, mock_send_telegram):
         """Test that preloading filters blocks below score threshold."""
         symbols = ["BTC/USDT"]
         timeframes = ["15m"]
         
         client = live_ws.BinanceWebSocketClient(symbols, timeframes)
         
+        # Mock exchange info to return valid symbols
+        mock_exchange_info.return_value = {"BTCUSDT"}
+        
         # Mock historical data
         historical_data = pd.DataFrame({
-            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15T'),
+            'timestamp': pd.date_range('2024-01-01', periods=30, freq='15min'),
             'open': [29000.0 + i for i in range(30)],
             'high': [29100.0 + i for i in range(30)],
             'low': [28900.0 + i for i in range(30)],
